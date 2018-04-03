@@ -9,8 +9,8 @@ image:
 service:
   name: peatio
   type: ClusterIP
-  externalPort: 8080
-  internalPort: 8080
+  externalPort: 3005
+  internalPort: 3005
 
 ingress:
   enabled: false
