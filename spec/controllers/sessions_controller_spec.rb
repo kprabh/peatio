@@ -1,8 +1,12 @@
 describe SessionsController, type: :controller do
-  %i[ google_oauth2 auth0 ].each do |provider|
+  %i[ google_oauth2 auth0 barong ].each do |provider|
+    normalized_provider = provider.to_s.gsub(/(?:_|oauth2)+\z/i, '')
+
     describe "sign in using #{provider} provider" do
+      let(:auth_json) { OmniAuth.config.mock_auth[provider] }
+
       before do
-        request.env['omniauth.auth'] = OmniAuth.config.mock_auth[provider]
+        request.env['omniauth.auth'] = auth_json
       end
 
       after do
@@ -13,6 +17,19 @@ describe SessionsController, type: :controller do
         expect {
           post :create, provider: provider
         }.to change { Member.count }.by(1)
+
+        m = Member.last
+        expect(m.email).to eq auth_json[:info][:email]
+        if auth_json[:info].key?(:state)
+          expect(m.disabled).to eq(auth_json[:info][:state] != 'active')
+        end
+        if auth_json[:info].key?(:level)
+          expect(m.level).to eq(Member::Levels.get(auth_json[:info][:level]))
+        end
+        expect(m.authentications.count).to eq 1
+        expect(m.authentications.first.uid).to eq auth_json[:uid]
+        expect(m.authentications.first.provider).to eq auth_json[:provider]
+        expect(m.authentications.first.token).to eq auth_json[:credentials][:token]
       end
 
       it 'should successfully create a session' do
@@ -22,7 +39,7 @@ describe SessionsController, type: :controller do
       end
 
       context 'when no redirect URL is specified' do
-        before { ENV.delete("#{provider.upcase}_OAUTH2_REDIRECT_URL") }
+        before { ENV.delete("#{normalized_provider.upcase}_OAUTH2_REDIRECT_URL") }
 
         it 'should redirect the member to the settings URL' do
           post :create, provider: provider
@@ -32,11 +49,15 @@ describe SessionsController, type: :controller do
 
       context 'when redirect URL is specified in environment' do
         let(:redirect_url) { 'https://foo.bar' }
-        before { ENV["#{provider.upcase}_OAUTH2_REDIRECT_URL"] = redirect_url }
+        before { ENV["#{normalized_provider.upcase}_OAUTH2_REDIRECT_URL"] = redirect_url }
 
         it 'should redirect the member to the specified URL' do
           post :create, provider: provider
-          expect(response).to redirect_to redirect_url
+          if provider == :barong
+            expect(response).to redirect_to "#{redirect_url}?#{request.env['omniauth.auth']['credentials'].to_query}"
+          else
+            expect(response).to redirect_to redirect_url
+          end
         end
       end
 

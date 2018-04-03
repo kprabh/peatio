@@ -13,9 +13,8 @@ class Deposit < ActiveRecord::Base
 
   alias_attribute :sn, :id
 
-  delegate :name, to: :member, prefix: true
   delegate :id, to: :channel, prefix: true
-  delegate :coin?, :fiat?, to: :currency_obj
+  delegate :coin?, :fiat?, to: :currency
 
   belongs_to :member
   belongs_to :account
@@ -36,7 +35,7 @@ class Deposit < ActiveRecord::Base
     state :cancelled
     state :submitted
     state :rejected
-    state :accepted, after_commit: [:do, :send_mail]
+    state :accepted
     state :checked
     state :warning
 
@@ -52,7 +51,7 @@ class Deposit < ActiveRecord::Base
       transitions from: :submitted, to: :rejected
     end
 
-    event :accept do
+    event :accept, after_commit: %i[ do send_mail ] do
       transitions from: :submitted, to: :accepted
     end
 
@@ -69,26 +68,8 @@ class Deposit < ActiveRecord::Base
     txid
   end
 
-  class << self
-    def channel
-      DepositChannel.find_by_key(name.demodulize.underscore)
-    end
-
-    def resource_name
-      name.demodulize.underscore.pluralize
-    end
-
-    def params_name
-      name.underscore.gsub('/', '_')
-    end
-
-    def new_path
-      "new_#{params_name}_path"
-    end
-  end
-
   def channel
-    self.class.channel
+    DepositChannel.find_by!(currency: currency.code)
   end
 
   def update_confirmations(data)
@@ -99,7 +80,18 @@ class Deposit < ActiveRecord::Base
     txid && txid.truncate(40)
   end
 
-  private
+  def transaction_url
+    if txid? && currency.transaction_url_template?
+      currency.transaction_url_template.gsub('#{txid}', txid)
+    end
+  end
+
+  def as_json(*)
+    super.merge(transaction_url: transaction_url)
+  end
+
+private
+
   def do
     account.lock!.plus_funds amount, reason: Account::DEPOSIT, ref: self
   end
@@ -130,3 +122,33 @@ class Deposit < ActiveRecord::Base
     ::Pusher["private-#{member.sn}"].trigger_async('deposits', { type: 'destroy', id: self.id })
   end
 end
+
+# == Schema Information
+# Schema version: 20180227163417
+#
+# Table name: deposits
+#
+#  id                     :integer          not null, primary key
+#  account_id             :integer
+#  member_id              :integer
+#  currency_id            :integer
+#  amount                 :decimal(32, 16)
+#  fee                    :decimal(32, 16)
+#  fund_uid               :string(255)
+#  fund_extra             :string(255)
+#  txid                   :string(255)
+#  state                  :integer
+#  aasm_state             :string
+#  created_at             :datetime
+#  updated_at             :datetime
+#  done_at                :datetime
+#  confirmations          :string(255)
+#  type                   :string(255)
+#  payment_transaction_id :integer
+#  txout                  :integer
+#
+# Indexes
+#
+#  index_deposits_on_currency_id     (currency_id)
+#  index_deposits_on_txid_and_txout  (txid,txout)
+#

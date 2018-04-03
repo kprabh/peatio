@@ -4,17 +4,31 @@ module APIv2
       current_user or raise AuthorizationError
     end
 
+    def email_must_be_verified!
+      if current_user.level? && !current_user.level.in?(%w[ email_verified phone_verified identity_verified ])
+        raise Grape::Exceptions::Base.new(text: 'Please, verify your E-Mail address.', status: 401)
+      end
+    end
+
+    def phone_must_be_verified!
+      if current_user.level? && !current_user.level.in?(%w[ email_verified phone_verified ])
+        raise Grape::Exceptions::Base.new(text: 'Please, verify your phone.', status: 401)
+      end
+    end
+
+    def identity_must_be_verified!
+      if current_user.level? && !current_user.level.identity_verified?
+        raise Grape::Exceptions::Base.new(text: 'Please, verify your identity.', status: 401)
+      end
+    end
+
     def redis
       @r ||= KlineDB.redis
     end
 
     def current_user
-      # Keypair authentication provides member ID.
-      if env.key?('api_v2.authentic_member_id')
-        Member.find_by_id(env['api_v2.authentic_member_id'])
-
       # JWT authentication provides member email.
-      elsif env.key?('api_v2.authentic_member_email')
+      if env.key?('api_v2.authentic_member_email')
         Member.find_by_email(env['api_v2.authentic_member_email'])
       end
     end
@@ -34,9 +48,9 @@ module APIv2
         source:        'APIv2',
         state:         ::Order::WAIT,
         member_id:     current_user.id,
-        ask:           current_market.base_unit,
-        bid:           current_market.quote_unit,
-        currency:      current_market.id,
+        ask:           Currency.find_by!(code: current_market.base_unit).id,
+        bid:           Currency.find_by!(code: current_market.quote_unit).id,
+        market_id:     current_market.id,
         ord_type:      attrs[:ord_type] || 'limit',
         price:         attrs[:price],
         volume:        attrs[:volume],
@@ -97,6 +111,5 @@ module APIv2
         JSON.parse('[%s]' % redis.lrange(key, offset, -1).join(','))
       end
     end
-
   end
 end

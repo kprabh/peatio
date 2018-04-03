@@ -10,17 +10,12 @@ module Admin
       can :read, Proof
       can :update, Proof
       can :manage, Member
-      can :manage, IdDocument
 
       can :menu, Deposit
-      can :manage, ::Deposits::Bank
-      can :manage, ::Deposits::Satoshi
-      can :manage, ::Deposits::Ripple
+      Deposit.descendants.each { |d| can :manage, d }
 
       can :menu, Withdraw
-      can :manage, ::Withdraws::Bank
-      can :manage, ::Withdraws::Satoshi
-      can :manage, ::Withdraws::Ripple
+      Withdraw.descendants.each { |w| can :manage, w }
     end
   end
 end

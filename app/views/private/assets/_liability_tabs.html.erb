@@ -1,57 +1,31 @@
 <div class="tabbable">
   <ul class="nav nav-tabs">
-    <li class="active">
-      <a class="btc-proof" href="#btc-proof" data-toggle="tab"><%= t('.verify-btc').html_safe %></a>
-    </li>
-    <li>
-      <a class="xrp-proof" href="#xrp-proof" data-toggle="tab"><%= t('.verify-xrp').html_safe %></a>
-    </li>
-    <li>
-      <a class="usd-proof" href="#usd-proof" data-toggle="tab"><%= t('.verify-usd').html_safe %></a>
-    </li>
+    <% Currency.all.each_with_index do |ccy, i| %>
+      <li class="<%= 'active' if i.zero? %>">
+        <% name = ccy.fiat? ? :fiat : ccy.code %>
+        <a class="<%= name %>-proof" href="#<%= name %>-proof" data-toggle="tab">
+          <%= t(".verify-#{ccy.type}", currency: ccy.code.upcase).html_safe %>
+        </a>
+      </li>
+    <% end %>
   </ul>
 
   <div class="tab-content">
-    <div id="btc-proof" class="tab-pane active">
-      <div class="trade-wrapper">
-        <div class="assets">
-          <span class="title"><%= t('.btc-assets-total').html_safe %></span>
-          <span class="currency">
-            <%= t('currency.icon.btc').html_safe %>
-            <%= @btc_proof.sum %>
-          </span>
+    <% Currency.all.each_with_index do |ccy, i| %>
+      <% name    = ccy.fiat? ? 'fiat' : ccy.code %>
+      <% proof   = instance_variable_get(:"@#{name}_proof") %>
+      <% account = instance_variable_get(:"@#{name}_account") %>
+      <div id="<%= name %>-proof" class="tab-pane<%= ' active' if i.zero? %>">
+        <div class="trade-wrapper">
+          <div class="assets">
+            <span class="title"><%= t(".#{ccy.type}-assets-total", currency: ccy.code.upcase).html_safe %></span>
+            <span class="currency">
+              <%= proof.present? ? proof.sum : t('private.assets.liability_proof_generation') %>
+            </span>
+          </div>
+          <%= render 'liability_data', account: account, proof: proof %>
         </div>
-        <%= render 'liability_data', account: @btc_account, proof: @btc_proof %>
-
       </div>
-    </div>
-
-    <div id="xrp-proof" class="tab-pane active">
-      <div class="trade-wrapper">
-        <div class="assets">
-          <span class="title"><%= t('.xrp-assets-total').html_safe %></span>
-          <span class="currency">
-            <%= t('currency.icon.xrp').html_safe %>
-            <%= @xrp_proof.sum %>
-          </span>
-        </div>
-        <%= render 'liability_data', account: @xrp_account, proof: @xrp_proof %>
-
-      </div>
-    </div>
-
-    <div id="usd-proof" class="tab-pane">
-      <div class="trade-wrapper">
-        <div class="assets">
-          <span class="title"><%= t('.usd-assets-total').html_safe %></span>
-          <span class="currency">
-            <%= t('currency.icon.usd').html_safe %>
-            <%= @usd_proof.sum %>
-          </span>
-        </div>
-        <%= render 'liability_data', account: @usd_account, proof: @usd_proof %>
-
-      </div>
-    </div>
+    <% end %>
   </div>
 </div>

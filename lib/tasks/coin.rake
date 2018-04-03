@@ -12,7 +12,7 @@ namespace :coin do
     end
 
     missed = []
-    CoinRPC[code].listtransactions(account, number).each do |tx|
+    CoinAPI[code].listtransactions(account, number).each do |tx|
       next if tx['category'] != 'receive'
 
       unless PaymentTransaction::Normal.find_by(txid: tx['txid'])
@@ -27,7 +27,7 @@ namespace :coin do
 
     puts "#{code} --- Reprocessing .."
     missed.each do |tx|
-      AMQPQueue.enqueue :deposit_coin, { txid: tx['txid'], channel_key: channel.key }
+      AMQPQueue.enqueue :deposit_coin, { txid: tx['txid'], currency: channel.currency.code }
     end
     puts "#{code} --- Done."
   end

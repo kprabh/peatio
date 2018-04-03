@@ -6,11 +6,11 @@ describe Withdraw do
     end
   end
 
-  context 'fund source' do
-    it 'should strip trailing spaces in fund_uid' do
-      fund_source = create(:btc_fund_source, uid: 'test')
-      @withdraw = create(:satoshi_withdraw, fund_source: fund_source)
-      expect(@withdraw.fund_uid).to eq('test')
+  context 'withdraw destination' do
+    it 'should strip trailing spaces in address' do
+      withdraw_destination = create(:btc_withdraw_destination, address: 'test')
+      @withdraw   = create(:satoshi_withdraw, destination_id: withdraw_destination.id)
+      expect(@withdraw.destination.address).to eq('test')
     end
   end
 
@@ -47,32 +47,32 @@ describe Withdraw do
       end
 
       it 'should be rejected if address is invalid' do
-        CoinRPC.stubs(:[]).returns(mock('rpc', validateaddress: { isvalid: false }))
+        CoinAPI.stubs(:[]).returns(mock('rpc', inspect_address!: { is_valid: false }))
         subject.audit!
         expect(subject).to be_rejected
       end
 
       it 'should be rejected if address belongs to hot wallet' do
-        CoinRPC.stubs(:[]).returns(mock('rpc', validateaddress: { isvalid: true, ismine: true }))
+        CoinAPI.stubs(:[]).returns(mock('rpc', inspect_address!: { is_valid: true, is_mine: true }))
         subject.audit!
         expect(subject).to be_rejected
       end
 
       it 'should accept withdraw with clean history' do
-        CoinRPC.stubs(:[]).returns(mock('rpc', validateaddress: { isvalid: true }))
+        CoinAPI.stubs(:[]).returns(mock('rpc', inspect_address!: { is_valid: true }))
         subject.audit!
         expect(subject).to be_accepted
       end
 
       it 'should mark withdraw with suspicious history' do
-        CoinRPC.stubs(:[]).returns(mock('rpc', validateaddress: { isvalid: true }))
+        CoinAPI.stubs(:[]).returns(mock('rpc', inspect_address!: { is_valid: true }))
         subject.account.versions.delete_all
         subject.audit!
         expect(subject).to be_suspect
       end
 
       it 'should approve quick withdraw directly' do
-        CoinRPC.stubs(:[]).returns(mock('rpc', validateaddress: { isvalid: true }))
+        CoinAPI.stubs(:[]).returns(mock('rpc', inspect_address!: { is_valid: true }))
         subject.update_attributes sum: '0.099'
         subject.audit!
         expect(subject).to be_processing
@@ -112,9 +112,9 @@ describe Withdraw do
     subject { create(:satoshi_withdraw) }
     before do
       @rpc = mock
-      @rpc.stubs(getbalance: 50_000, sendtoaddress: '12345', settxfee: true)
-      @broken_rpc = mock
-      @broken_rpc.stubs(getbalance: 5)
+      @rpc.stubs(load_balance!: 50_000, create_withdrawal!: '12345')
+      @broken_rpc = CoinAPI
+      @broken_rpc.stubs(load_balance!: 5)
 
       subject.submit
       subject.accept
@@ -122,20 +122,18 @@ describe Withdraw do
       subject.save!
     end
 
-    it 'transitions to :almost_done after calling rpc but getting Exception' do
-      CoinRPC.stubs(:[]).returns(@broken_rpc)
+    it 'transitions to :failed after calling rpc but getting Exception' do
+      CoinAPI.stubs(:[]).raises(CoinAPI::Error)
 
-      expect {
-        Worker::WithdrawCoin.new.process({ id: subject.id }, {}, {})
-      }.to raise_error(Account::BalanceError)
+      Worker::WithdrawCoin.new.process({ id: subject.id })
 
-      expect(subject.reload.almost_done?).to be true
+      expect(subject.reload.failed?).to be true
     end
 
     it 'transitions to :done after calling rpc' do
-      CoinRPC.stubs(:[]).returns(@rpc)
+      CoinAPI.stubs(:[]).returns(@rpc)
 
-      expect { Worker::WithdrawCoin.new.process({ id: subject.id }, {}, {}) }.to change { subject.account.reload.amount }.by(-subject.sum)
+      expect { Worker::WithdrawCoin.new.process({ id: subject.id }) }.to change { subject.account.reload.amount }.by(-subject.sum)
 
       subject.reload
       expect(subject.done?).to be true
@@ -143,12 +141,20 @@ describe Withdraw do
     end
 
     it 'does not send coins again if previous attempt failed' do
-      CoinRPC.stubs(:[]).returns(@broken_rpc)
-      begin Worker::WithdrawCoin.new.process({ id: subject.id }, {}, {}); rescue; end
-      CoinRPC.stubs(:[]).returns(mock)
+      CoinAPI.stubs(:[]).raises(CoinAPI::Error)
+      begin Worker::WithdrawCoin.new.process({ id: subject.id }); rescue; end
+      CoinAPI.stubs(:[]).returns(CoinAPI::BTC)
 
-      expect { Worker::WithdrawCoin.new.process({ id: subject.id }, {}, {}) }.to_not change { subject.account.reload.amount }
-      expect(subject.reload.almost_done?).to be true
+      expect { Worker::WithdrawCoin.new.process({ id: subject.id }) }.to_not change { subject.account.reload.amount }
+      expect(subject.reload.failed?).to be true
+    end
+
+    it 'unlocks coins after calling rpc but getting Exception' do
+      CoinAPI.stubs(:[]).raises(CoinAPI::Error)
+
+      expect { Worker::WithdrawCoin.new.process({ id: subject.id }) }
+          .to change { subject.account.reload.locked }.by(-subject.sum)
+          .and change { subject.account.reload.balance }.by(subject.sum)
     end
   end
 
@@ -247,12 +253,12 @@ describe Withdraw do
     end
 
     it 'returns false if exceeds quick withdraw amount' do
-      withdraw.currency_obj.stubs(:quick_withdraw_max).returns(withdraw.sum - 1)
+      withdraw.currency.stubs(:quick_withdraw_limit).returns(withdraw.sum - 1)
       expect(withdraw).to_not be_quick
     end
 
     it 'returns true' do
-      withdraw.currency_obj.stubs(:quick_withdraw_max).returns(withdraw.sum + 1)
+      withdraw.currency.stubs(:quick_withdraw_limit).returns(withdraw.sum + 1)
       expect(withdraw).to be_quick
     end
   end

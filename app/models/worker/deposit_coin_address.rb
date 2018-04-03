@@ -3,19 +3,23 @@ module Worker
     def process(payload)
       payload.symbolize_keys!
 
-      payment_address = PaymentAddress.find payload[:payment_address_id]
-      return if payment_address.address.present?
+      acc = Account.find_by_id(payload[:account_id])
+      return unless acc
 
-      currency = payload[:currency]
-      address  = CoinRPC[currency].getnewaddress('payment')
+      acc.payment_address.tap do |pa|
+        pa.with_lock do
+          next if pa.address.present?
 
-      payment_address.update!(currency == 'xrp' ? address : { address: address })
+          result = acc.currency.api.create_address!
+          pa.update! \
+            result.extract!(:address, :secret).merge(details: result)
 
-      ::Pusher["private-#{payment_address.account.member.sn}"].trigger_async(
-        'deposit_address',
-        type: 'create',
-        attributes: payment_address.as_json
-      )
+          Pusher["private-#{acc.member.sn}"].trigger_async \
+            :deposit_address,
+            type:       'create',
+            attributes: pa.as_json
+        end
+      end
     end
   end
 end

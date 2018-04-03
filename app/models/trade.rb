@@ -4,9 +4,8 @@ class Trade < ActiveRecord::Base
 
   extend Enumerize
   enumerize :trend, in: {:up => 1, :down => 0}
-  enumerize :currency, in: Market.enumerize, scope: true
 
-  belongs_to :market, class_name: 'Market', foreign_key: 'currency'
+  belongs_to :market, class_name: 'Market'
   belongs_to :ask, class_name: 'OrderAsk', foreign_key: 'ask_id'
   belongs_to :bid, class_name: 'OrderBid', foreign_key: 'bid_id'
 
@@ -21,14 +20,16 @@ class Trade < ActiveRecord::Base
 
   alias_method :sn, :id
 
+  scope :with_market, -> (market) { where(market: Market === market ? market : Market.find(market)) }
+
   class << self
-    def latest_price(currency)
-      with_currency(currency).order(:id).reverse_order
+    def latest_price(market)
+      with_market(market).order(:id).reverse_order
         .limit(1).first.try(:price) || "0.0".to_d
     end
 
     def filter(market, timestamp, from, to, limit, order)
-      trades = with_currency(market).order(order)
+      trades = with_market(market).order(order)
       trades = trades.limit(limit) if limit.present?
       trades = trades.where('created_at <= ?', timestamp) if timestamp.present?
       trades = trades.where('id > ?', from) if from.present?
@@ -56,7 +57,7 @@ class Trade < ActiveRecord::Base
       at:     created_at.to_i,
       price:  price.to_s  || ZERO,
       volume: volume.to_s || ZERO,
-      market: currency
+      market: market
     }
   end
 
@@ -70,3 +71,31 @@ class Trade < ActiveRecord::Base
     }
   end
 end
+
+# == Schema Information
+# Schema version: 20180329154130
+#
+# Table name: trades
+#
+#  id            :integer          not null, primary key
+#  price         :decimal(32, 16)
+#  volume        :decimal(32, 16)
+#  ask_id        :integer
+#  bid_id        :integer
+#  trend         :integer
+#  market_id     :string(10)
+#  created_at    :datetime
+#  updated_at    :datetime
+#  ask_member_id :integer
+#  bid_member_id :integer
+#  funds         :decimal(32, 16)
+#
+# Indexes
+#
+#  index_trades_on_ask_id         (ask_id)
+#  index_trades_on_ask_member_id  (ask_member_id)
+#  index_trades_on_bid_id         (bid_id)
+#  index_trades_on_bid_member_id  (bid_member_id)
+#  index_trades_on_created_at     (created_at)
+#  index_trades_on_market_id      (market_id)
+#

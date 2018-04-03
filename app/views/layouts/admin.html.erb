@@ -6,6 +6,7 @@
     <%= render 'shared/sentry' %>
     <%= csrf_meta_tags %>
     <%= stylesheet_link_tag 'admin', media: 'all' %>
+    <%= custom_stylesheet_link_tag_for :admin %>
     <%= javascript_include_tag 'admin' %>
   </head>
 
@@ -16,12 +17,6 @@
           <li class="<%= check_active('dashboard') %>">
             <%= link_to t('header.dashboard'), main_app.admin_dashboard_path %>
           </li>
-
-          <% if can? :manage, IdDocument %>
-            <li class="<%= check_active('id_documents') %>">
-              <%= link_to t('admin_header.id_documents'), admin_id_documents_path %>
-            </li>
-          <% end %>
 
           <% if can? :read, Proof %>
             <li class="<%= check_active(Proof) %>">
@@ -38,7 +33,7 @@
               <ul class="dropdown-menu">
                 <% DepositChannel.all.sort.each do |c| %>
                   <% if can? :manage, c.kls %>
-                    <li><%= link_to c.title_text, [:admin, c.kls] %></li>
+                    <li><%= link_to c.currency.code.upcase, admin_deposit_index_path(c.currency.code) %></li>
                   <% end %>
                 <% end %>
               </ul>
@@ -54,7 +49,7 @@
               <ul class="dropdown-menu">
                 <% WithdrawChannel.all.each do |c| %>
                   <% if can? :manage, c.kls %>
-                    <li><%= link_to c.title_text, [:admin, c.kls] %></li>
+                    <li><%= link_to c.currency.code.upcase, admin_withdraw_index_path(c.currency.code) %></li>
                   <% end %>
                 <% end %>
               </ul>

@@ -10,7 +10,7 @@ class SessionsController < ApplicationController
 
     reset_session rescue nil
     session[:member_id] = @member.id
-    save_session_key @member.id, cookies['_peatio_session']
+    memoize_member_session_id @member.id, session.id
     redirect_on_successful_sign_in
   end
 
@@ -19,7 +19,7 @@ class SessionsController < ApplicationController
   end
 
   def destroy
-    clear_all_sessions current_user.id
+    destroy_member_sessions(current_user.id)
     reset_session
     redirect_to root_path
   end
@@ -31,8 +31,10 @@ private
   end
 
   def redirect_on_successful_sign_in
-    "#{params[:provider].to_s.upcase}_OAUTH2_REDIRECT_URL".tap do |key|
-      if ENV[key]
+    "#{params[:provider].to_s.gsub(/(?:_|oauth2)+\z/i, '').upcase}_OAUTH2_REDIRECT_URL".tap do |key|
+      if ENV[key] && params[:provider].to_s == 'barong'
+        redirect_to "#{ENV[key]}?#{auth_hash.fetch('credentials').to_query}"
+      elsif ENV[key]
         redirect_to ENV[key]
       else
         redirect_back_or_settings_page

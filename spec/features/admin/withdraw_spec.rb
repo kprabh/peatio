@@ -1,6 +1,6 @@
 feature 'withdraw', js: true do
-  let!(:member) { create :member }
-  let!(:admin_member) { create :member, email: Member.admins.first }
+  let!(:member) { create :member, :verified_identity }
+  let!(:admin_member) { create :member, :verified_identity, email: Member.admins.first }
 
   let!(:account) do
     member.get_account(:usd).tap { |a| a.update_attributes locked: 8000, balance: 10_000 }
@@ -28,12 +28,12 @@ feature 'withdraw', js: true do
     visit_admin_withdraw_page
 
     expect(page).to have_content(withdraw.sn)
-    expect(page).to have_content(withdraw.fund_extra)
-    expect(page).to_not have_content(withdraw.fund_uid)
+    expect(page).to have_content(withdraw.label)
+    expect(page).to_not have_content(withdraw.address)
 
     click_on I18n.t('actions.view')
-    expect(page).to have_content(withdraw.fund_uid)
-    expect(page).to have_content(withdraw.fund_extra)
+    expect(page).to have_content(withdraw.address)
+    expect(page).to have_content(withdraw.label)
     expect(page).to have_content(I18n.t('actions.transact'))
     expect(page).to have_content(I18n.t('actions.reject'))
   end

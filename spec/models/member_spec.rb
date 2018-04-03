@@ -1,12 +1,12 @@
 describe Member do
-  let(:member) { build(:member) }
+  let(:member) { build(:member, :verified_identity) }
   subject { member }
 
   describe 'sn' do
-    subject(:member) { create(:member) }
+    subject(:member) { create(:member, :verified_identity) }
     it { expect(member.sn).to_not be_nil }
     it { expect(member.sn).to_not be_empty }
-    it { expect(member.sn).to match /^PEA.*TIO$/ }
+    it { expect(member.sn).to match /\ASN[A-Z0-9]{10}$/ }
   end
 
   describe 'before_create' do
@@ -26,15 +26,8 @@ describe Member do
     end
   end
 
-  describe 'build id_document before create' do
-    it 'create id_document for the member' do
-      member.save
-      expect(member.reload.id_document).to_not be_blank
-    end
-  end
-
   describe '#trades' do
-    subject { create(:member) }
+    subject { create(:member, :verified_identity) }
 
     it 'should find all trades belong to user' do
       ask = create(:order_ask, member: member)
@@ -46,7 +39,7 @@ describe Member do
   end
 
   describe '.current' do
-    let(:member) { create(:member) }
+    let(:member) { create(:member, :verified_identity) }
     before do
       Thread.current[:user] = member
     end
@@ -59,62 +52,14 @@ describe Member do
   end
 
   describe '.current=' do
-    let(:member) { create(:member) }
+    let(:member) { create(:member, :verified_identity) }
     before { Member.current = member }
     after { Member.current = nil }
     specify { expect(Thread.current[:user]).to eq member }
   end
 
-  describe 'Member.search' do
-    before do
-      create(:member)
-      create(:member)
-      create(:member)
-    end
-
-    describe 'search without any condition' do
-      subject { Member.search(field: nil, term: nil) }
-
-      it { expect(subject.count).to eq(3) }
-    end
-
-    describe 'search by email' do
-      let(:member) { create(:member) }
-      subject { Member.search(field: 'email', term: member.email) }
-
-      it { expect(subject.count).to eq(1) }
-      it { expect(subject).to be_include(member) }
-    end
-
-    describe 'search by name' do
-      let(:member) { create(:verified_member) }
-      subject { Member.search(field: 'name', term: member.name) }
-
-      it { expect(subject.count).to eq(1) }
-      it { expect(subject).to be_include(member) }
-    end
-
-    describe 'search by wallet address' do
-      let(:fund_source) { create(:btc_fund_source) }
-      let(:member) { fund_source.member }
-      subject { Member.search(field: 'wallet_address', term: fund_source.uid) }
-
-      it { expect(subject.count).to eq(1) }
-      it { expect(subject).to be_include(member) }
-    end
-
-    describe 'search by deposit address' do
-      let(:payment_address) { create(:btc_payment_address) }
-      let(:member) { payment_address.account.member }
-      subject { Member.search(field: 'wallet_address', term: payment_address.address) }
-
-      it { expect(subject.count).to eq(1) }
-      it { expect(subject).to be_include(member) }
-    end
-  end
-
   describe '#remove_auth' do
-    let!(:member) { create(:member) }
+    let!(:member) { create(:member, :verified_identity) }
     let!(:authentication) { create(:authentication, provider: 'OAuth2', member_id: member.id, uid: member.id)}
 
     it 'should delete authentication' do

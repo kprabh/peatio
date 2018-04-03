@@ -13,10 +13,9 @@
     <div class="partial-tree json">
       <div class="assets">
         <span class="title">
-          <%= t('.partial-tree', currency: proof.currency.upcase) %>
+          <%= t('.partial-tree', currency: proof.currency.code.upcase) %>
         </span>
         <span class="currency">
-          <%= t("currency.icon.#{proof.currency}").html_safe %>
           <%= partial_tree.sum %>
         </span>
       </div>
@@ -33,6 +32,6 @@
     <div class="proof-bottom"><%= verify_link(proof, partial_tree) %></div>
 
   <% else %>
-    <p><%= t('.liability-proof-generating') %></p>
+    <p><%= t('.liability_proof_generation') %></p>
   <% end %>
 </div>

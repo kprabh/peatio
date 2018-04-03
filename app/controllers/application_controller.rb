@@ -1,10 +1,11 @@
 class ApplicationController < ActionController::Base
+  include SessionUtils
   protect_from_forgery with: :exception
 
   helper_method :current_user, :is_admin?, :current_market, :gon
   before_action :set_timezone, :set_gon
   after_action :allow_iframe
-  rescue_from CoinRPC::ConnectionRefusedError, with: :coin_rpc_connection_refused
+  rescue_from CoinAPI::ConnectionRefusedError, with: :coin_rpc_connection_refused
 
   private
 
@@ -13,12 +14,12 @@ class ApplicationController < ActionController::Base
   end
 
   def current_market
-    @current_market ||= Market.find_by_id(params[:market]) || Market.find_by_id(cookies[:market_id]) || Market.first
+    @current_market ||= Market.find_by(id: params[:market]) || Market.find_by(id: cookies[:market_id]) || Market.first
   end
 
   def redirect_back_or_settings_page
     if cookies[:redirect_to].present?
-      redirect_to cookies[:redirect_to]
+      redirect_to URI.parse(cookies[:redirect_to]).path
       cookies[:redirect_to] = nil
     else
       redirect_to settings_path
@@ -37,7 +38,7 @@ class ApplicationController < ActionController::Base
   end
 
   def auth_verified!
-    unless current_user&.id_document&.verified?
+    if current_user.level.present? && !current_user.level.identity_verified?
       redirect_to settings_path, alert: t('private.settings.index.auth-verified')
     end
   end
@@ -63,16 +64,16 @@ class ApplicationController < ActionController::Base
     gon.local = I18n.locale
     gon.market = current_market.attributes
     gon.ticker = current_market.ticker
-    gon.markets = Market.to_hash
-
+    gon.markets = Market.find_each.each_with_object({}) { |market, memo| memo[market.id] = market.as_json }
+    gon.host = request.base_url
     gon.pusher = {
-      key:       ENV.fetch('PUSHER_KEY', nil),
-      cluster:   ENV.fetch('PUSHER_CLUSTER', 'eu'),
-      wsHost:    ENV.fetch('PUSHER_HOST', 'ws.pusherapp.com'),
-      wsPort:    ENV.fetch('PUSHER_WS_PORT', 80).to_i,
-      wssPort:   ENV.fetch('PUSHER_WSS_PORT', 443).to_i,
-      encrypted: ENV.fetch('PUSHER_ENCRYPTED', true)
-    }
+      key:       ENV.fetch('PUSHER_CLIENT_KEY'),
+      wsHost:    ENV.fetch('PUSHER_CLIENT_WS_HOST'),
+      httpHost:  ENV['PUSHER_CLIENT_HTTP_HOST'],
+      wsPort:    ENV.fetch('PUSHER_CLIENT_WS_PORT'),
+      wssPort:   ENV.fetch('PUSHER_CLIENT_WSS_PORT'),
+      encrypted: ENV.fetch('PUSHER_CLIENT_ENCRYPTED').present?
+    }.reject { |k, v| v.blank? }
 
     gon.clipboard = {
       :click => I18n.t('actions.clipboard.click'),
@@ -80,7 +81,6 @@ class ApplicationController < ActionController::Base
     }
 
     gon.i18n = {
-      brand: I18n.t('gon.brand'),
       ask: I18n.t('gon.ask'),
       bid: I18n.t('gon.bid'),
       cancel: I18n.t('actions.cancel'),
@@ -132,15 +132,15 @@ class ApplicationController < ActionController::Base
       }
     }
 
-    gon.currencies = Currency.all.inject({}) do |memo, currency|
+    gon.currencies = Currency.visible.inject({}) do |memo, currency|
       memo[currency.code] = {
-        code: currency[:code],
-        symbol: currency[:symbol],
-        isCoin: currency[:coin]
+        code: currency.code,
+        symbol: currency.symbol,
+        isCoin: currency.coin?
       }
       memo
     end
-    gon.fiat_currency = Currency.first.code
+    gon.fiat_currency = Peatio.base_fiat_ccy
 
     gon.tickers = {}
     Market.all.each do |market|
@@ -150,30 +150,20 @@ class ApplicationController < ActionController::Base
     if current_user
       gon.user = { sn: current_user.sn }
       gon.accounts = current_user.accounts.inject({}) do |memo, account|
-        memo[account.currency] = {
-          currency: account.currency,
+        memo[account.currency.code] = {
+          currency: account.currency.code,
           balance: account.balance,
           locked: account.locked
-        } if account.currency_obj.try(:visible)
+        } if account.currency.try(:visible)
         memo
       end
     end
+
+    gon.bank_details_html = ENV['BANK_DETAILS_HTML']
   end
 
   def coin_rpc_connection_refused
     render 'errors/connection'
-  end
-
-  def save_session_key(member_id, key)
-    Rails.cache.write "peatio:sessions:#{member_id}:#{key}", 1, expire_after: ENV['SESSION_EXPIRE'].to_i.minutes
-  end
-
-  def clear_all_sessions(member_id)
-    if redis = Rails.cache.instance_variable_get(:@data)
-      redis.keys("peatio:sessions:#{member_id}:*").each {|k| Rails.cache.delete k.split(':').last }
-    end
-
-    Rails.cache.delete_matched "peatio:sessions:#{member_id}:*"
   end
 
   def allow_iframe

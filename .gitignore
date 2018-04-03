@@ -22,9 +22,12 @@ tmp
 
 # Ignore all config files
 /config/application.yml
-/config/currencies.yml
 /config/markets.yml
-/config/banks.yml
+/config/markets.old.yml
+/config/withdraw_channels.yml
+/config/deposit_channels.yml
+/config/plugins.yml
+/config/seed/*
 
 # Ignore translations.js
 /public/javascripts/translations.js
@@ -42,6 +45,7 @@ tags
 
 /vendor/bundle
 /vendor/assets/yarn_components
+/vendor/plugins
 .env
 .DS_Store
 .agignore

@@ -8,19 +8,19 @@ gem 'puma'
 gem 'mysql2', '~> 0.3.21'
 gem 'redis-rails'
 
-gem 'rotp'
 gem 'json'
 gem 'jbuilder'
 
+gem 'oauth2', github: 'oauth-xx/oauth2'
 gem 'omniauth',               '~> 1.8.1'
 gem 'omniauth-auth0',         '~> 2.0.0'
-gem 'omniauth-google-oauth2', '~> 0.5.2'
+gem 'omniauth-google-oauth2', '~> 0.5.3'
+gem 'omniauth-barong',        '~> 0.1.2'
 
 gem 'figaro'
 gem 'hashie', '~> 3.0'
 
-gem 'aasm', '~> 3.4.0'
-gem 'amqp', '~> 1.3.0'
+gem 'aasm', '~> 4.12'
 gem 'bunny', '~> 2.9.0'
 gem 'cancancan'
 gem 'enumerize'
@@ -49,7 +49,6 @@ gem 'bootstrap-sass', '~> 3.2.0.2'
 gem 'font-awesome-sass'
 gem 'bourbon'
 gem 'momentjs-rails'
-gem 'eco'
 gem 'browser', '~> 0.8.0'
 gem 'rbtree'
 gem 'liability-proof', '0.0.9'
@@ -57,17 +56,22 @@ gem 'grape', '~> 1.0.1'
 gem 'grape-entity', '~> 0.5.2'
 gem 'grape-swagger', '~> 0.27.3'
 gem 'grape-swagger-ui', '~> 2.2.8'
-gem 'rack-attack', '~> 3.0.0'
+gem 'rack-attack', '~> 4.3.1'
 gem 'easy_table'
-gem 'carrierwave', '~> 0.10.0'
-gem 'rest-client', '~> 1.6.8'
-gem 'jwt', '~> 1.5'
+gem 'faraday', '~> 0.12'
+gem 'jwt', '~> 2.1'
 gem 'email_validator', '~> 1.6'
+gem 'validate_url', '~> 1.0.2'
 gem 'clipboard-rails', '~> 1.7'
 gem 'god', '~> 0.13.7', require: false
 gem 'mini_racer', '~> 0.1', require: false
 gem 'arel-is-blank', '~> 1.0'
 gem 'sentry-raven', '~> 2.7', require: false
+gem 'memoist', '~> 0.16'
+gem 'method-not-implemented', '~> 1.0'
+gem 'passgen', '~> 1.0'
+gem 'validates_lengths_from_database', '~> 0.7.0'
+gem 'ejs','~> 1.1'
 
 group :development, :test do
   gem 'factory_bot_rails'
@@ -75,8 +79,12 @@ group :development, :test do
   gem 'binding_of_caller'
   gem 'quiet_assets'
   gem 'timecop'
-  gem 'rspec-rails'
+  gem 'rspec-rails', '~> 3.7'
   gem 'pry-byebug'
+end
+
+group :development do
+  gem 'annotate', '~> 2.7'
 end
 
 group :test do
@@ -87,4 +95,5 @@ group :test do
   gem 'selenium-webdriver',  '~> 3.8'
   gem 'chromedriver-helper', '~> 1.1'
   gem 'rack_session_access', '~> 0.1'
+  gem 'webmock',             '~> 3.3'
 end

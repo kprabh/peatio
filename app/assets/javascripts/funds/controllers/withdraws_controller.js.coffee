@@ -7,11 +7,13 @@ app.controller 'WithdrawsController', ['$scope', '$stateParams', '$http', '$gon'
     return false
 
   $scope.currency = currency = $stateParams.currency
+  $scope.currencyTranslationLocals = currency: currency.toUpperCase()
   $scope.current_user = current_user = $gon.user
-  $scope.name = current_user.name
   $scope.account = Account.findBy('currency', $scope.currency)
   $scope.balance = $scope.account.balance
   $scope.withdraw_channel = WithdrawChannel.findBy('currency', $scope.currency)
+  $scope.fiatCurrency = gon.fiat_currency
+  $scope.fiatCurrencyTranslationLocals = currency: gon.fiat_currency.toUpperCase()
 
   $scope.selected_fund_source_id = (newId) ->
     if angular.isDefined(newId)
@@ -42,26 +44,25 @@ app.controller 'WithdrawsController', ['$scope', '$stateParams', '$http', '$gon'
 
   @withdraw = {}
   @createWithdraw = (currency) ->
-    withdraw_channel = WithdrawChannel.findBy('currency', currency)
-    account = withdraw_channel.account()
-    data = { withdraw: { member_id: current_user.id, currency: currency, sum: @withdraw.sum, fund_source: _selectedFundSourceId } }
+    data = { withdraw: { member_id: current_user.id, currency: currency, sum: @withdraw.sum, destination_id: _selectedFundSourceId } }
 
     $('.form-submit > input').attr('disabled', 'disabled')
 
-    $http.post("/withdraws/#{withdraw_channel.resource_name}", data)
+    $http.post("/withdraws/#{currency}", data)
+      .success ->
+        location.reload()
       .error (responseText) ->
         $.publish 'flash', { message: responseText }
       .finally =>
         @withdraw = {}
         $('.form-submit > input').removeAttr('disabled')
         $.publish 'withdraw:form:submitted'
-        location.reload()
 
   @withdrawAll = ->
     @withdraw.sum = Number($scope.account.balance)
 
   $scope.openFundSourceManagerPanel = ->
-    if $scope.currency == $gon.fiat_currency
+    if $scope.currency is $gon.fiat_currency
       template = '/templates/fund_sources/bank.html'
       className = 'ngdialog-theme-default custom-width'
     else

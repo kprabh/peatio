@@ -3,11 +3,12 @@ module APIv2
     helpers ::APIv2::NamedParams
 
     before { authenticate! }
+    before { identity_must_be_verified! }
 
     desc 'Get your orders, results is paginated.', scopes: %w(history trade)
     params do
       use :market
-      optional :state, type: String,  default: 'wait', values: Order.state.values, desc: "Filter order by state, default to 'wait' (active orders)."
+      optional :state, type: String,  default: 'wait', values: -> { Order.state.values }, desc: "Filter order by state, default to 'wait' (active orders)."
       optional :limit, type: Integer, default: 100, range: 1..1000, desc: "Limit the number of returned orders, default to 100."
       optional :page,  type: Integer, default: 1, desc: "Specify the page of paginated results."
       optional :order_by, type: String, values: %w(asc desc), default: 'asc', desc: "If set, returned orders will be sorted in specific order, default to 'asc'."
@@ -15,7 +16,7 @@ module APIv2
     get "/orders" do
       orders = current_user.orders
         .order(order_param)
-        .with_currency(current_market)
+        .with_market(current_market)
         .with_state(params[:state])
         .page(params[:page])
         .per(params[:limit])
@@ -41,8 +42,8 @@ module APIv2
       end
     end
     post "/orders/multi" do
-        orders = create_orders params[:orders]
-        present orders, with: APIv2::Entities::Order
+      orders = create_orders params[:orders]
+      present orders, with: APIv2::Entities::Order
     end
 
     desc 'Create a Sell/Buy order.', scopes: %w(trade)

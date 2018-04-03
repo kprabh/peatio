@@ -1,8 +1,8 @@
 FactoryBot.define do
   factory :order_bid do
-    bid :usd
-    ask :btc
-    currency :btcusd
+    bid { Currency.find_by!(code: :usd).id }
+    ask { Currency.find_by!(code: :btc).id }
+    market { Market.find(:btcusd) }
     state :wait
     source 'Web'
     ord_type 'limit'
@@ -14,9 +14,9 @@ FactoryBot.define do
   end
 
   factory :order_ask do
-    bid :usd
-    ask :btc
-    currency :btcusd
+    bid { Currency.find_by!(code: :usd).id }
+    ask { Currency.find_by!(code: :btc).id }
+    market { Market.find(:btcusd) }
     state :wait
     source 'Web'
     ord_type 'limit'

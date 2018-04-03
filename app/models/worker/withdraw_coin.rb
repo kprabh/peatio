@@ -1,41 +1,24 @@
 module Worker
   class WithdrawCoin
-    def process(payload, metadata, delivery_info)
+    def process(payload)
       payload.symbolize_keys!
 
-      Withdraw.transaction do
-        withdraw = Withdraw.lock.find payload[:id]
+      withdraw = Withdraw.lock.find_by_id(payload[:id])
+      return if withdraw.blank? || !withdraw.processing?
 
-        return unless withdraw.processing?
+      withdraw.transaction do
+        balance = CoinAPI[withdraw.currency.code.to_sym].load_balance!
+        withdraw.mark_suspect if balance < withdraw.sum
 
-        withdraw.whodunnit('Worker::WithdrawCoin') do
-          withdraw.call_rpc
-          withdraw.save!
-        end
-      end
+        pa = withdraw.account.payment_address
 
-      Withdraw.transaction do
-        withdraw = Withdraw.lock.find payload[:id]
+        txid = CoinAPI[withdraw.currency.code.to_sym].create_withdrawal!(
+          { address: pa.address, secret: pa.secret },
+          { address: withdraw.destination.address },
+          withdraw.amount.to_d
+        )
 
-        return unless withdraw.almost_done?
-
-        if withdraw.currency.to_sym == :xrp
-          txid = CoinRPC[withdraw.currency.to_sym].sendtoaddress(
-            withdraw.fund_uid,
-            withdraw.amount.to_f,
-            fee
-          )
-        else
-          balance = CoinRPC[withdraw.currency.to_sym].getbalance.to_d
-          raise Account::BalanceError, 'Insufficient coins' if balance < withdraw.sum
-
-          fee = [withdraw.fee.to_f || withdraw.channel.try(:fee) || 0.0005, 0.1].min
-
-          CoinRPC[withdraw.currency.to_sym].settxfee(fee)
-          txid = CoinRPC[withdraw.currency.to_sym].sendtoaddress(withdraw.fund_uid, withdraw.amount.to_f)
-        end
-
-        withdraw.whodunnit('Worker::WithdrawCoin') do
+        withdraw.whodunnit 'Worker::WithdrawCoin' do
           withdraw.update_columns(txid: txid, done_at: Time.current)
 
           # withdraw.succeed! will start another transaction, cause
@@ -44,6 +27,12 @@ module Worker
           withdraw.save!
         end
       end
+
+    rescue Exception => e
+      Rails.logger.error { 'Error during withdraw processing.' }
+      Rails.logger.debug { "Failed to process #{withdraw.currency.code} withdraw with ID #{withdraw.id}: #{e.inspect}." }
+    ensure
+      withdraw.fail!
     end
   end
 end

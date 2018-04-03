@@ -1,25 +1,21 @@
 feature 'withdraw', js: true do
-  let!(:member) { create :verified_member }
+  let!(:member) { create :member, :verified_identity }
 
   let(:radio_label) do
-    "#{member.name} @ #{member.email}"
+    member.email
   end
 
   before do
     Withdraw.any_instance.stubs(:examine).returns(true)
-    CoinRPC::BTC.any_instance
-                 .stubs(:validateaddress)
-                 .returns(isvalid: true, ismine: false)
-
     btc_account = member.get_account(:btc)
     btc_account.update_attributes balance: 1000
     usd_account = member.get_account(:usd)
     usd_account.update_attributes balance: 0
 
-    @label = 'common address'
-    @bank = 'bc'
-    @btc_addr = create :btc_fund_source, extra: @label, uid: '1btcaddress', member: member
-    @usd_addr = create :usd_fund_source, extra: @bank, uid: '1234566890', member: member
+    @label    = 'common address'
+    @bank     = 'bc'
+    @btc_addr = create(:btc_withdraw_destination, label: @label, member: member)
+    @usd_addr = create(:usd_withdraw_destination, label: @bank, member: member)
   end
 
   it 'allows user to add a BTC withdraw address, withdraw BTC' do
@@ -61,15 +57,15 @@ feature 'withdraw', js: true do
   private
 
   def submit_bank_withdraw_request(amount)
-    select 'Bank of China', from: 'withdraw_fund_extra'
-    select @bank, from: 'withdraw_fund_uid'
+    select 'Bank of China', from: 'withdraw_label'
+    select @bank, from: 'withdraw_address'
     fill_in 'withdraw_sum', with: amount
     click_on I18n.t 'actions.submit'
   end
 
   def submit_satoshi_withdraw_request(amount)
-    select @label, from: 'withdraw_fund_uid'
-    fill_in 'withdraw_fund_extra', with: @label
+    select @label, from: 'withdraw_address'
+    fill_in 'withdraw_label', with: @label
     fill_in 'withdraw_sum', with: amount
     click_on I18n.t('actions.submit')
   end

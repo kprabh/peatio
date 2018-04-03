@@ -1,7 +1,8 @@
 class Withdraw < ActiveRecord::Base
+
   STATES = [:submitting, :submitted, :rejected, :accepted, :suspect, :processing,
-            :done, :canceled, :almost_done, :failed]
-  COMPLETED_STATES = [:done, :rejected, :canceled, :almost_done, :failed]
+            :done, :canceled, :failed]
+  COMPLETED_STATES = [:done, :rejected, :canceled, :failed]
 
   extend Enumerize
 
@@ -15,13 +16,12 @@ class Withdraw < ActiveRecord::Base
 
   belongs_to :member
   belongs_to :account
+  belongs_to :destination, class_name: 'WithdrawDestination', required: true
   has_many :account_versions, as: :modifiable
 
   delegate :balance, to: :account, prefix: true
-  delegate :key_text, to: :channel, prefix: true
   delegate :id, to: :channel, prefix: true
-  delegate :name, to: :member, prefix: true
-  delegate :coin?, :fiat?, to: :currency_obj
+  delegate :coin?, :fiat?, to: :currency
 
   before_validation :fix_precision
   before_validation :calc_fee
@@ -32,9 +32,7 @@ class Withdraw < ActiveRecord::Base
   after_create :sync_create
   after_destroy :sync_destroy
 
-  validates_with WithdrawBlacklistValidator
-
-  validates :fund_uid, :amount, :fee, :account, :currency, :member, presence: true
+  validates :amount, :fee, :account, :currency, :member, presence: true
 
   validates :fee, numericality: {greater_than_or_equal_to: 0}
   validates :amount, numericality: {greater_than: 0}
@@ -47,20 +45,11 @@ class Withdraw < ActiveRecord::Base
   scope :completed, -> { where aasm_state: COMPLETED_STATES }
   scope :not_completed, -> { where.not aasm_state: COMPLETED_STATES }
 
-  def self.channel
-    WithdrawChannel.find_by_key(name.demodulize.underscore)
-  end
-
   def channel
-    self.class.channel
-  end
-
-  def channel_name
-    channel.key
+    WithdrawChannel.find_by!(currency: currency.code)
   end
 
   alias_attribute :withdraw_id, :sn
-  alias_attribute :full_name, :member_name
 
   def generate_sn
     id_part = sprintf '%04d', id
@@ -71,31 +60,30 @@ class Withdraw < ActiveRecord::Base
 
   aasm :whiny_transitions => false do
     state :submitting,  initial: true
-    state :submitted,   after_commit: :send_email
-    state :canceled,    after_commit: [:send_email]
+    state :submitted
+    state :canceled
     state :accepted
-    state :suspect,     after_commit: :send_email
-    state :rejected,    after_commit: :send_email
-    state :processing,  after_commit: [:send_coins!, :send_email]
-    state :almost_done
-    state :done,        after_commit: [:send_email]
-    state :failed,      after_commit: :send_email
+    state :suspect
+    state :rejected
+    state :processing
+    state :done
+    state :failed
 
-    event :submit do
+    event :submit, after_commit: :send_email do
       transitions from: :submitting, to: :submitted
       after do
         lock_funds
       end
     end
 
-    event :cancel do
+    event :cancel, after_commit: :send_email do
       transitions from: [:submitting, :submitted, :accepted], to: :canceled
       after do
         after_cancel
       end
     end
 
-    event :mark_suspect do
+    event :mark_suspect, after_commit: :send_email do
       transitions from: :submitted, to: :suspect
     end
 
@@ -103,27 +91,24 @@ class Withdraw < ActiveRecord::Base
       transitions from: :submitted, to: :accepted
     end
 
-    event :reject do
+    event :reject, after_commit: :send_email do
       transitions from: [:submitted, :accepted, :processing], to: :rejected
       after :unlock_funds
     end
 
-    event :process do
+    event :process, after_commit: %i[ send_coins! send_email ] do
       transitions from: :accepted, to: :processing
     end
 
-    event :call_rpc do
-      transitions from: :processing, to: :almost_done
-    end
-
-    event :succeed do
-      transitions from: [:processing, :almost_done], to: :done
+    event :succeed, after_commit: :send_email do
+      transitions from: :processing, to: :done
 
       before [:set_txid, :unlock_and_sub_funds]
     end
 
-    event :fail do
+    event :fail, after_commit: :send_email do
       transitions from: :processing, to: :failed
+      after :unlock_funds
     end
   end
 
@@ -132,7 +117,7 @@ class Withdraw < ActiveRecord::Base
   end
 
   def quick?
-    sum <= currency_obj.quick_withdraw_max
+    sum <= currency.quick_withdraw_limit
   end
 
   def audit!
@@ -206,27 +191,20 @@ class Withdraw < ActiveRecord::Base
   end
 
   def fix_precision
-    if sum && currency_obj.precision
-      self.sum = sum.round(currency_obj.precision, BigDecimal::ROUND_DOWN)
+    if sum && currency.precision
+      self.sum = sum.round(currency.precision, BigDecimal::ROUND_DOWN)
     end
   end
 
   def calc_fee
-    if respond_to?(:set_fee)
-      set_fee
-    end
-
     self.sum ||= 0.0
-    self.fee ||= 0.0
+    # You can set fee for each currency in withdraw_channels.yml.
+    self.fee ||= WithdrawChannel.find_by!(currency: currency.code).fee
     self.amount = sum - fee
   end
 
   def set_account
-    self.account = member.get_account(currency)
-  end
-
-  def self.resource_name
-    name.demodulize.underscore.pluralize
+    self.account = member.get_account(currency.code)
   end
 
   def sync_update
@@ -241,5 +219,43 @@ class Withdraw < ActiveRecord::Base
     ::Pusher["private-#{member.sn}"].trigger_async('withdraws', { type: 'destroy', id: self.id })
   end
 
+public
 
+  def fiat?
+    Withdraws::Fiat === self
+  end
+
+  def coin?
+    !fiat?
+  end
+
+  def as_json(*)
+    super.merge(destination: destination.as_json)
+  end
 end
+
+# == Schema Information
+# Schema version: 20180305113434
+#
+# Table name: withdraws
+#
+#  id             :integer          not null, primary key
+#  destination_id :integer
+#  sn             :string(255)
+#  account_id     :integer
+#  member_id      :integer
+#  currency_id    :integer
+#  amount         :decimal(32, 16)
+#  fee            :decimal(32, 16)
+#  created_at     :datetime
+#  updated_at     :datetime
+#  done_at        :datetime
+#  txid           :string(255)
+#  aasm_state     :string
+#  sum            :decimal(32, 16)  default(0.0), not null
+#  type           :string(255)
+#
+# Indexes
+#
+#  index_withdraws_on_currency_id  (currency_id)
+#

@@ -1,34 +1,41 @@
+require 'securerandom'
+
 class Member < ActiveRecord::Base
   has_many :orders
   has_many :accounts
   has_many :payment_addresses, through: :accounts
-  has_many :withdraws
-  has_many :fund_sources
+  has_many :withdraws, -> { order(id: :desc) }
+  has_many :withdraw_destinations, -> { order(id: :desc) }
   has_many :deposits
-  has_many :api_tokens
-
-  has_one :id_document
 
   has_many :authentications, dependent: :destroy
 
   scope :enabled, -> { where(disabled: false) }
 
-  delegate :name,       to: :id_document, allow_nil: true
-  delegate :full_name,  to: :id_document, allow_nil: true
-  delegate :verified?,  to: :id_document, prefix: true, allow_nil: true
+  before_validation :sanitize, :assign_sn
 
-  before_validation :sanitize, :generate_sn
-
-  validates :sn, presence: true
+  validates :sn, presence: true, uniqueness: true
   validates :email, presence: true, uniqueness: true, email: true
 
-  before_create :build_default_id_document
   after_create  :touch_accounts
   after_update  :sync_update
 
+  attr_readonly :email
+
   class << self
     def from_auth(auth_hash)
-      locate_auth(auth_hash) || locate_email(auth_hash) || create_from_auth(auth_hash)
+      (locate_auth(auth_hash) || locate_email(auth_hash) || Member.new).tap do |member|
+        member.transaction do
+          info_hash       = auth_hash.fetch('info')
+          member.email    = info_hash.fetch('email')
+          member.level    = Member::Levels.get(info_hash['level']) if info_hash.key?('level')
+          member.disabled = info_hash.key?('state') && info_hash['state'] != 'active'
+          member.save!
+          auth = Authentication.locate(auth_hash) || member.authentications.build_auth(auth_hash)
+          auth.token = auth_hash.dig('credentials', 'token')
+          auth.save!
+        end
+      end
     end
 
     def current
@@ -44,22 +51,14 @@ class Member < ActiveRecord::Base
     end
 
     def search(field: nil, term: nil)
-      result = case field
-               when 'email'
-                 where('members.email LIKE ?', "%#{term}%")
-               when 'name'
-                 joins(:id_document).where('id_documents.name LIKE ?', "%#{term}%")
-               when 'wallet_address'
-                 members = joins(:fund_sources).where('fund_sources.uid' => term)
-                 if members.empty?
-                  members = joins(:payment_addresses).where('payment_addresses.address' => term)
-                 end
-                 members
-               else
-                 all
-               end
-
-      result.order(:id).reverse_order
+      case field
+        when 'email', 'sn'
+          where("members.#{field} LIKE ?", "%#{term}%")
+        when 'wallet_address'
+          joins(:payment_addresses).where('payment_addresses.address LIKE ?', "%#{term}%")
+        else
+          all
+      end.order(:id).reverse_order
     end
 
     private
@@ -69,21 +68,7 @@ class Member < ActiveRecord::Base
     end
 
     def locate_email(auth_hash)
-      email = auth_hash.dig('info', 'email')
-      return if email.blank?
-
-      find_by_email(email).tap do |member|
-        member&.add_auth(auth_hash)
-      end
-    end
-
-    def create_from_auth(auth_hash)
-      new(email:    auth_hash['info']['email'],
-          nickname: auth_hash['info']['nickname']
-      ).tap do |member|
-        member.save!
-        member.add_auth(auth_hash)
-      end
+      find_by_email(auth_hash.dig('info', 'email'))
     end
   end
 
@@ -95,10 +80,6 @@ class Member < ActiveRecord::Base
     @is_admin ||= self.class.admins.include?(self.email)
   end
 
-  def add_auth(auth_hash)
-    authentications.build_auth(auth_hash).save!
-  end
-
   def trigger(event, data)
     AMQPQueue.enqueue(:pusher_member, {member_id: id, event: event, data: data})
   end
@@ -108,33 +89,21 @@ class Member < ActiveRecord::Base
   end
 
   def to_s
-    "#{name || email} - #{sn}"
+    "#{email} - #{sn}"
   end
 
-  def gravatar
-    "//gravatar.com/avatar/" + Digest::MD5.hexdigest(email.strip.downcase) + "?d=retro"
-  end
-
-  def initial?
-    name? and !name.empty?
-  end
-
-  def get_account(currency)
-    account = accounts.with_currency(currency.to_sym).first
-
-    if account.nil?
-      touch_accounts
-      account = accounts.with_currency(currency.to_sym).first
+  def get_account(model_or_code)
+    accounts.with_currency(model_or_code).first.yield_self do |account|
+      touch_accounts unless account
+      accounts.with_currency(model_or_code).first
     end
-
-    account
   end
   alias :ac :get_account
 
   def touch_accounts
-    less = Currency.codes.map(&:to_s) - self.accounts.map(&:currency).map(&:to_s)
-    less.each do |code|
-      self.accounts.create!(currency: code, balance: 0, locked: 0)
+    Currency.find_each do |currency|
+      next if accounts.where(currency: currency).exists?
+      accounts.create!(currency: currency, balance: 0, locked: 0)
     end
   end
 
@@ -152,13 +121,12 @@ class Member < ActiveRecord::Base
 
   def as_json(options = {})
     super(options).merge({
-      "name" => self.name,
       "memo" => self.id
     })
   end
 
-  def jwt
-    JWT.encode({ email: email }, APIv2::Auth::Utils.jwt_shared_secret_key, 'RS256')
+  def level
+    self[:level].to_s.inquiry
   end
 
   private
@@ -167,19 +135,37 @@ class Member < ActiveRecord::Base
     self.email.try(:downcase!)
   end
 
-  def generate_sn
-    self.sn and return
+  def assign_sn
+    return unless sn.blank?
     begin
-      self.sn = "PEA#{ROTP::Base32.random_base32(8).upcase}TIO"
-    end while Member.where(:sn => self.sn).any?
+      self.sn = random_sn
+    end while Member.where(sn: self.sn).any?
   end
-
-  def build_default_id_document
-    build_id_document
-    true
+  
+  def random_sn
+    "SN#{SecureRandom.hex(5).upcase}"
   end
-
+  
   def sync_update
     ::Pusher["private-#{sn}"].trigger_async('members', { type: 'update', id: self.id, attributes: self.changes_attributes_as_json })
   end
 end
+
+# == Schema Information
+# Schema version: 20180216145412
+#
+# Table name: members
+#
+#  id           :integer          not null, primary key
+#  level        :string(20)       default("")
+#  sn           :string(12)       not null
+#  email        :string(255)      not null
+#  disabled     :boolean          default(FALSE), not null
+#  api_disabled :boolean          default(FALSE), not null
+#  created_at   :datetime         not null
+#  updated_at   :datetime         not null
+#
+# Indexes
+#
+#  index_members_on_sn  (sn) UNIQUE
+#
